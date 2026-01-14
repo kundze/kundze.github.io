@@ -9,7 +9,7 @@
 
   <script>
     async function refresh() {
-      const r = await fetch("http://77.42.92.6/api/valheim");
+      const r = await fetch("https://api.kundze.lt/api/valheim");
       const d = await r.json();
       document.getElementById("players").textContent =
         d.online ? `${d.players} / ${d.maxPlayers} players online` : "Server offline";
