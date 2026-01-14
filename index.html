@@ -205,14 +205,39 @@
       padding: 6px 0 0;
     }
     a{color: inherit}
+  
+    .chart-wrap{
+      height: 240px;
+      position: relative;
+      margin-top: 10px;
+    }
+    .segmented{
+      display:inline-flex;
+      gap:6px;
+      padding:6px;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: rgba(0,0,0,.16);
+    }
+    .segmented button{
+      padding:8px 10px;
+      border-radius: 12px;
+      background: transparent;
+    }
+    .segmented button.active{
+      background: rgba(255,255,255,.10);
+      border-color: rgba(255,255,255,.22);
+    }
+
   </style>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
   <div class="wrap">
     <header>
       <div class="title">
         <h1>Valheim serverio būsena</h1>
-        <div class="subtitle">Rodo aktyvių žaidėjų skaičių tavo serveryje realiu laiku.</div>
+        <div class="subtitle">Aktyvių žaidėjų skaičių serveryje realiu laiku.</div>
       </div>
       <div class="pill" title="Atnaujinama automatiškai kas 15 sekundžių">
         <span class="dot" id="pillDot"></span>
@@ -265,13 +290,29 @@
       </div>
     </section>
 
-    <div class="foot">
-      Duomenys imami iš tavo API: <a href="https://api.kundze.lt/api/valheim" target="_blank" rel="noreferrer">https://api.kundze.lt/api/valheim</a>
+
+    <!-- History chart -->
+    <div class="card">
+      <div class="row">
+        <p class="server-name" style="margin:0">Žaidėjų istorija</p>
+        <div class="segmented" aria-label="Laikotarpis">
+          <button id="range24" type="button" class="active">24h</button>
+          <button id="range7d" type="button">7d</button>
+        </div>
+      </div>
+      <div class="label" style="margin-top:8px">Atnaujinama kas minutę. Offline = 0.</div>
+      <div class="chart-wrap">
+        <canvas id="historyChart"></canvas>
+      </div>
     </div>
+
+
   </div>
 
   <script>
     const API_URL = "https://api.kundze.lt/api/valheim";
+    const HISTORY_URL = "https://api.kundze.lt/api/history";
+
 
     const el = (id) => document.getElementById(id);
 
@@ -326,6 +367,102 @@
         alert(API_URL);
       }
     });
+
+
+    // --- History chart (Chart.js) ---
+    let historyChart = null;
+    let historyHours = 24;
+
+    function setActiveRangeButton() {
+      el("range24").classList.toggle("active", historyHours === 24);
+      el("range7d").classList.toggle("active", historyHours === 24 * 7);
+    }
+
+    function buildOrUpdateChart(labels, values) {
+      const ctx = document.getElementById("historyChart");
+      if (!ctx) return;
+
+      if (!historyChart) {
+        historyChart = new Chart(ctx, {
+          type: "line",
+          data: {
+            labels,
+            datasets: [{
+              label: "Players",
+              data: values,
+              tension: 0.25,
+              pointRadius: 0,
+              borderWidth: 2
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            plugins: {
+              legend: { display: false },
+              tooltip: { intersect: false, mode: "index" }
+            },
+            scales: {
+              x: {
+                ticks: { maxTicksLimit: 10, color: "rgba(255,255,255,.65)" },
+                grid: { color: "rgba(255,255,255,.08)" }
+              },
+              y: {
+                beginAtZero: true,
+                ticks: { precision: 0, color: "rgba(255,255,255,.65)" },
+                grid: { color: "rgba(255,255,255,.08)" }
+              }
+            }
+          }
+        });
+      } else {
+        historyChart.data.labels = labels;
+        historyChart.data.datasets[0].data = values;
+        historyChart.update();
+      }
+    }
+
+    async function refreshHistory() {
+      try {
+        const r = await fetch(`${HISTORY_URL}?hours=${historyHours}`, { cache: "no-store" });
+        const d = await r.json();
+
+        const points = Array.isArray(d.points) ? d.points : [];
+
+        // Reduce labels for long ranges: show time for 24h, show date+time for 7d.
+        const useDate = historyHours > 24;
+        const labels = points.map(p => {
+          const dt = new Date(p.ts);
+          return useDate
+            ? dt.toLocaleString([], { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+            : dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        });
+
+        const values = points.map(p => (p.online ? (p.players ?? 0) : 0));
+        buildOrUpdateChart(labels, values);
+      } catch (e) {
+        // If history fails, keep current chart (or show empty)
+        buildOrUpdateChart([], []);
+      }
+    }
+
+    el("range24").addEventListener("click", () => {
+      historyHours = 24;
+      setActiveRangeButton();
+      refreshHistory();
+    });
+
+    el("range7d").addEventListener("click", () => {
+      historyHours = 24 * 7;
+      setActiveRangeButton();
+      refreshHistory();
+    });
+
+    setActiveRangeButton();
+    refreshHistory();
+    setInterval(refreshHistory, 60000); // 1 min
+
 
     refresh();
     setInterval(refresh, 15000);
