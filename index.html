@@ -1,19 +1,332 @@
 <!doctype html>
-<html>
+<html lang="lt">
 <head>
   <meta charset="utf-8" />
-  <title>Valheim Players</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Valheim Server Status</title>
+  <meta name="description" content="Valheim serverio žaidėjų skaičius realiu laiku" />
+  <style>
+    :root{
+      --bg1:#0b1020;
+      --bg2:#0a2a2a;
+      --card: rgba(255,255,255,.08);
+      --card2: rgba(255,255,255,.06);
+      --text: rgba(255,255,255,.92);
+      --muted: rgba(255,255,255,.65);
+      --border: rgba(255,255,255,.14);
+      --shadow: 0 10px 40px rgba(0,0,0,.35);
+      --good: #2ee59d;
+      --bad: #ff5c7a;
+      --warn: #ffd166;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", "Liberation Sans", sans-serif;
+      color: var(--text);
+      min-height:100vh;
+      background:
+        radial-gradient(1200px 800px at 10% 10%, rgba(46,229,157,.22), transparent 60%),
+        radial-gradient(900px 700px at 90% 20%, rgba(255,92,122,.18), transparent 55%),
+        radial-gradient(900px 700px at 50% 110%, rgba(255,209,102,.15), transparent 55%),
+        linear-gradient(160deg, var(--bg1), var(--bg2));
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:24px;
+    }
+    .wrap{
+      width:min(860px, 100%);
+      display:grid;
+      gap:18px;
+    }
+    header{
+      display:flex;
+      align-items:flex-end;
+      justify-content:space-between;
+      gap:16px;
+    }
+    .title{
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+    }
+    h1{
+      margin:0;
+      font-size: clamp(22px, 2.6vw, 30px);
+      letter-spacing:.2px;
+    }
+    .subtitle{
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.4;
+    }
+    .pill{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding:10px 12px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      font-size: 13px;
+      color: var(--muted);
+      user-select:none;
+      white-space:nowrap;
+    }
+    .dot{
+      width:10px;height:10px;border-radius:50%;
+      background: var(--warn);
+      box-shadow: 0 0 0 4px rgba(255,209,102,.18);
+    }
+
+    .grid{
+      display:grid;
+      grid-template-columns: 1.2fr .8fr;
+      gap:18px;
+    }
+    @media (max-width: 780px){
+      .grid{grid-template-columns: 1fr}
+      header{flex-direction:column; align-items:flex-start}
+    }
+
+    .card{
+      background: linear-gradient(180deg, var(--card), var(--card2));
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 18px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      position:relative;
+      overflow:hidden;
+    }
+    .card::before{
+      content:"";
+      position:absolute;
+      inset:-2px;
+      background: radial-gradient(600px 200px at 20% 0%, rgba(46,229,157,.18), transparent 60%);
+      pointer-events:none;
+    }
+    .row{
+      position:relative;
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:14px;
+    }
+    .server-name{
+      font-size: 16px;
+      color: var(--muted);
+      margin:0;
+    }
+    .status{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      padding:8px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(0,0,0,.18);
+      font-size: 13px;
+      color: var(--muted);
+      user-select:none;
+    }
+    .status .dot{
+      box-shadow:none;
+      width:10px;height:10px;
+    }
+
+    .big{
+      position:relative;
+      margin-top: 18px;
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+    }
+    .players{
+      font-size: clamp(44px, 6vw, 64px);
+      font-weight: 800;
+      letter-spacing: -0.8px;
+      line-height: 1;
+      margin:0;
+    }
+    .label{
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .mini{
+      display:grid;
+      gap:12px;
+    }
+    .mini .item{
+      display:flex;
+      justify-content:space-between;
+      gap:12px;
+      padding: 12px 12px;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: rgba(0,0,0,.16);
+    }
+    .mini .k{
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .mini .v{
+      font-size: 13px;
+    }
+
+    .btns{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      margin-top: 16px;
+    }
+    button{
+      border: 1px solid var(--border);
+      background: rgba(0,0,0,.18);
+      color: var(--text);
+      padding: 10px 12px;
+      border-radius: 12px;
+      cursor:pointer;
+      font-size: 13px;
+    }
+    button:hover{ background: rgba(0,0,0,.28); }
+    button:active{ transform: translateY(1px); }
+
+    .foot{
+      color: var(--muted);
+      font-size: 12px;
+      text-align:center;
+      padding: 6px 0 0;
+    }
+    a{color: inherit}
+  </style>
 </head>
 <body>
-  <h1 id="players">Loading…</h1>
+  <div class="wrap">
+    <header>
+      <div class="title">
+        <h1>Valheim serverio būsena</h1>
+        <div class="subtitle">Rodo aktyvių žaidėjų skaičių tavo serveryje realiu laiku.</div>
+      </div>
+      <div class="pill" title="Atnaujinama automatiškai kas 15 sekundžių">
+        <span class="dot" id="pillDot"></span>
+        <span id="pillText">Jungiamės…</span>
+      </div>
+    </header>
+
+    <section class="grid">
+      <!-- Main card -->
+      <div class="card">
+        <div class="row">
+          <p class="server-name" id="serverName">Serveris</p>
+          <div class="status" id="status">
+            <span class="dot" id="statusDot"></span>
+            <span id="statusText">Tikrinama…</span>
+          </div>
+        </div>
+
+        <div class="big">
+          <p class="players" id="playersCount">—</p>
+          <div class="label" id="playersLabel">žaidėjai online</div>
+        </div>
+
+        <div class="btns">
+          <button id="refreshBtn" type="button">Atnaujinti dabar</button>
+          <button id="copyBtn" type="button">Kopijuoti API adresą</button>
+        </div>
+      </div>
+
+      <!-- Side info -->
+      <div class="card">
+        <div class="mini">
+          <div class="item">
+            <div class="k">API endpoint</div>
+            <div class="v"><code>/api/valheim</code></div>
+          </div>
+          <div class="item">
+            <div class="k">Last update</div>
+            <div class="v" id="lastUpdate">—</div>
+          </div>
+          <div class="item">
+            <div class="k">Max players</div>
+            <div class="v" id="maxPlayers">—</div>
+          </div>
+          <div class="item">
+            <div class="k">Status</div>
+            <div class="v" id="miniStatus">—</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="foot">
+      Duomenys imami iš tavo API: <a href="https://api.kundze.lt/api/valheim" target="_blank" rel="noreferrer">https://api.kundze.lt/api/valheim</a>
+    </div>
+  </div>
 
   <script>
-    async function refresh() {
-      const r = await fetch("https://api.kundze.lt/api/valheim");
-      const d = await r.json();
-      document.getElementById("players").textContent =
-        d.online ? `${d.players} / ${d.maxPlayers} players online` : "Server offline";
+    const API_URL = "https://api.kundze.lt/api/valheim";
+
+    const el = (id) => document.getElementById(id);
+
+    function setState({ online, name, players, maxPlayers, note }) {
+      el("serverName").textContent = name || "Valheim serveris";
+      el("playersCount").textContent = online ? `${players} / ${maxPlayers ?? "—"}` : "Offline";
+      el("maxPlayers").textContent = maxPlayers ?? "—";
+
+      const statusText = online ? "Online" : "Offline";
+      el("statusText").textContent = note ? `${statusText} (${note})` : statusText;
+      el("miniStatus").textContent = statusText;
+
+      // Dots
+      const good = getComputedStyle(document.documentElement).getPropertyValue("--good").trim();
+      const bad  = getComputedStyle(document.documentElement).getPropertyValue("--bad").trim();
+      const warn = getComputedStyle(document.documentElement).getPropertyValue("--warn").trim();
+
+      const color = online ? good : bad;
+      el("statusDot").style.background = color;
+
+      el("pillDot").style.background = online ? good : warn;
+      el("pillText").textContent = online ? "Veikia" : "Tikrinama / nepasiekiama";
+
+      el("playersLabel").textContent = online ? "žaidėjai online" : "serveris nepasiekiamas";
+      el("lastUpdate").textContent = new Date().toLocaleString();
     }
+
+    async function refresh() {
+      try {
+        const r = await fetch(API_URL, { cache: "no-store" });
+        const d = await r.json();
+
+        setState({
+          online: !!d.online,
+          name: d.name,
+          players: d.players ?? 0,
+          maxPlayers: d.maxPlayers ?? null,
+        });
+      } catch (e) {
+        setState({ online: false, name: "Valheim serveris", players: 0, maxPlayers: null, note: "error" });
+      }
+    }
+
+    el("refreshBtn").addEventListener("click", refresh);
+
+    el("copyBtn").addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(API_URL);
+        el("copyBtn").textContent = "Nukopijuota ✅";
+        setTimeout(() => (el("copyBtn").textContent = "Kopijuoti API adresą"), 1400);
+      } catch {
+        alert(API_URL);
+      }
+    });
+
     refresh();
     setInterval(refresh, 15000);
   </script>
