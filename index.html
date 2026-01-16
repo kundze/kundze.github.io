@@ -237,7 +237,7 @@
     <header>
       <div class="title">
         <h1>Valheim serverio būsena</h1>
-        <div class="subtitle">Aktyvių žaidėjų skaičių serveryje realiu laiku.</div>
+        <div class="subtitle">Rodo aktyvių žaidėjų skaičių tavo serveryje realiu laiku.</div>
       </div>
       <div class="pill" title="Atnaujinama automatiškai kas 15 sekundžių">
         <span class="dot" id="pillDot"></span>
@@ -300,13 +300,16 @@
           <button id="range7d" type="button">7d</button>
         </div>
       </div>
-      <div class="label" style="margin-top:8px">Atnaujinama kas minutę. Offline = 0.</div>
+      <div class="label" style="margin-top:8px">Grafike palikti tik pasikeitimų taškai. Užvedus pelę matysi tikslų laiką.</div>
       <div class="chart-wrap">
         <canvas id="historyChart"></canvas>
       </div>
     </div>
 
 
+    <div class="foot">
+      Duomenys imami iš tavo API: <a href="https://api.kundze.lt/api/valheim" target="_blank" rel="noreferrer">https://api.kundze.lt/api/valheim</a>
+    </div>
   </div>
 
   <script>
@@ -378,20 +381,41 @@
       el("range7d").classList.toggle("active", historyHours === 24 * 7);
     }
 
-    function buildOrUpdateChart(labels, values) {
-      const ctx = document.getElementById("historyChart");
-      if (!ctx) return;
+    function buildOrUpdateChart(timestamps, values) {
+      const canvas = document.getElementById("historyChart");
+      if (!canvas) return;
+
+      // Labels are just indices; we format ticks/tooltips from timestamps to keep axis clean.
+      const labels = timestamps.map((_, i) => i);
+
+      const tickLabel = (ts) => {
+        const dt = new Date(ts);
+        if (historyHours === 24) {
+          return dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+        }
+        // 7d: show only MM-DD
+        return dt.toLocaleDateString([], { month: "2-digit", day: "2-digit" });
+      };
+
+      const tooltipLabel = (ts, players) => {
+        const dt = new Date(ts);
+        const date = dt.toLocaleDateString([], { month: "2-digit", day: "2-digit" });
+        const time = dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+        return `${date} ${time} — ${players} players`;
+      };
 
       if (!historyChart) {
-        historyChart = new Chart(ctx, {
+        historyChart = new Chart(canvas, {
           type: "line",
           data: {
             labels,
             datasets: [{
               label: "Players",
               data: values,
-              tension: 0.25,
-              pointRadius: 0,
+              stepped: true,        // changes are clearly visible
+              tension: 0,
+              pointRadius: 2,       // show change points
+              pointHoverRadius: 5,
               borderWidth: 2
             }]
           },
@@ -401,11 +425,32 @@
             animation: false,
             plugins: {
               legend: { display: false },
-              tooltip: { intersect: false, mode: "index" }
+              tooltip: {
+                intersect: false,
+                mode: "nearest",
+                callbacks: {
+                  title: (items) => {
+                    if (!items?.length) return "";
+                    const idx = items[0].dataIndex;
+                    return tickLabel(timestamps[idx]);
+                  },
+                  label: (item) => {
+                    const idx = item.dataIndex;
+                    return tooltipLabel(timestamps[idx], values[idx]);
+                  }
+                }
+              }
             },
             scales: {
               x: {
-                ticks: { maxTicksLimit: 10, color: "rgba(255,255,255,.65)" },
+                ticks: {
+                  maxTicksLimit: historyHours === 24 ? 8 : 7,
+                  color: "rgba(255,255,255,.65)",
+                  callback: function(value, index) {
+                    const ts = timestamps[index];
+                    return ts ? tickLabel(ts) : "";
+                  }
+                },
                 grid: { color: "rgba(255,255,255,.08)" }
               },
               y: {
@@ -419,6 +464,7 @@
       } else {
         historyChart.data.labels = labels;
         historyChart.data.datasets[0].data = values;
+        historyChart.options.scales.x.ticks.maxTicksLimit = historyHours === 24 ? 8 : 7;
         historyChart.update();
       }
     }
@@ -429,20 +475,31 @@
         const d = await r.json();
 
         const points = Array.isArray(d.points) ? d.points : [];
+        if (!points.length) {
+          buildOrUpdateChart([], []);
+          return;
+        }
 
-        // Reduce labels for long ranges: show time for 24h, show date+time for 7d.
-        const useDate = historyHours > 24;
-        const labels = points.map(p => {
-          const dt = new Date(p.ts);
-          return useDate
-            ? dt.toLocaleString([], { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
-            : dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-        });
+        // Keep only points where the visible value changes (offline/online or players count).
+        // Always keep first + last.
+        const reduced = [];
+        let lastVal = null;
 
-        const values = points.map(p => (p.online ? (p.players ?? 0) : 0));
-        buildOrUpdateChart(labels, values);
+        for (let i = 0; i < points.length; i++) {
+          const p = points[i];
+          const val = (p && p.online) ? (p.players ?? 0) : 0;
+
+          if (i === 0 || i === points.length - 1 || val !== lastVal) {
+            reduced.push({ ts: p.ts, val });
+            lastVal = val;
+          }
+        }
+
+        const timestamps = reduced.map(x => x.ts);
+        const values = reduced.map(x => x.val);
+
+        buildOrUpdateChart(timestamps, values);
       } catch (e) {
-        // If history fails, keep current chart (or show empty)
         buildOrUpdateChart([], []);
       }
     }
