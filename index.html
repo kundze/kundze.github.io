@@ -426,16 +426,6 @@
           data: {
             datasets: [
               {
-                label: "Players",
-                data: playersPoints,
-                stepped: true,
-                tension: 0,
-                pointRadius: 2,
-                pointHoverRadius: 5,
-                borderWidth: 2,
-                parsing: false
-              },
-              {
                 label: "Offline",
                 data: offlinePoints,
                 stepped: true,
@@ -443,8 +433,24 @@
                 pointRadius: 0,
                 borderWidth: 0,
                 fill: "origin",
-                backgroundColor: "rgba(255, 92, 122, .12)",
-                parsing: false
+                backgroundColor: "rgba(255, 92, 122, .14)",
+                parsing: false,
+                order: 0
+              },
+              {
+                label: "Players",
+                data: playersPoints,
+                stepped: true,
+                tension: 0,
+                pointRadius: 2,
+                pointHoverRadius: 6,
+                borderWidth: 2,
+                borderColor: "rgba(120, 200, 255, .95)",
+                pointBackgroundColor: "rgba(120, 200, 255, .95)",
+                pointBorderColor: "rgba(120, 200, 255, .95)",
+                parsing: false,
+                spanGaps: true,
+                order: 1
               }
             ]
           },
@@ -496,8 +502,8 @@
           }
         });
       } else {
-        historyChart.data.datasets[0].data = playersPoints;
-        historyChart.data.datasets[1].data = offlinePoints;
+        historyChart.data.datasets[0].data = offlinePoints;
+        historyChart.data.datasets[1].data = playersPoints;
         historyChart.options.scales.x.time.unit = timeUnit;
         historyChart.options.scales.x.ticks.maxTicksLimit = historyHours === 24 ? 8 : 7;
         historyChart.update();
