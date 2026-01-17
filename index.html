@@ -229,6 +229,8 @@
       border-color: rgba(255,255,255,.22);
     }
 
+  
+    #customControls{display:flex;}
   </style>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/luxon@3.5.0/build/global/luxon.min.js"></script>
@@ -300,9 +302,23 @@
         <div class="segmented" aria-label="Laikotarpis">
           <button id="range24" type="button" class="active">24h</button>
           <button id="range7d" type="button">7d</button>
+          <button id="rangeCustom" type="button">Custom</button>
         </div>
       </div>
-      <div class="label" style="margin-top:8px">Grafike palikti tik pasikeitimų taškai, bet pabaigoje visada pridedamas taškas „dabar“. Užvedus pelę matysi tikslų laiką.</div>
+      <div id="customControls" style="display:none; margin-top:10px; gap:10px; flex-wrap:wrap; align-items:center;">
+        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+          <label style="color: var(--muted); font-size: 13px;">
+            Nuo:
+            <input id="fromDt" type="datetime-local" style="margin-left:8px; padding:8px 10px; border-radius:12px; border:1px solid var(--border); background:rgba(0,0,0,.18); color:var(--text);" />
+          </label>
+          <label style="color: var(--muted); font-size: 13px;">
+            Iki:
+            <input id="toDt" type="datetime-local" style="margin-left:8px; padding:8px 10px; border-radius:12px; border:1px solid var(--border); background:rgba(0,0,0,.18); color:var(--text);" />
+          </label>
+          <button id="applyCustom" type="button">Apply</button>
+        </div>
+      </div>
+      <div class="label" style="margin-top:8px">Grafike palikti tik pasikeitimų taškai, bet pabaigoje visada pridedamas taškas „dabar“. Offline periodai pažymėti atskirai. Užvedus pelę matysi tikslų laiką.</div>
       <div class="chart-wrap">
         <canvas id="historyChart"></canvas>
       </div>
@@ -377,23 +393,28 @@
     // --- History chart (Chart.js) ---
     let historyChart = null;
     let historyHours = 24;
+    let historyMode = "preset"; // preset | custom
 
     function setActiveRangeButton() {
-      el("range24").classList.toggle("active", historyHours === 24);
-      el("range7d").classList.toggle("active", historyHours === 24 * 7);
+      el("range24").classList.toggle("active", historyMode === "preset" && historyHours === 24);
+      el("range7d").classList.toggle("active", historyMode === "preset" && historyHours === 24 * 7);
+      el("rangeCustom").classList.toggle("active", historyMode === "custom");
+      el("customControls").style.display = (historyMode === "custom") ? "flex" : "none";
     }
 
-    function buildOrUpdateChart(timestamps, values) {
+    function buildOrUpdateChart(points) {
       const canvas = document.getElementById("historyChart");
       if (!canvas) return;
 
-      // Use real timestamps on the X axis so spacing is proportional.
-      const dataPoints = timestamps.map((ts, i) => ({ x: ts, y: values[i] }));
+      // points: [{x: ts, y: players, online: bool}, ...]
+      const playersPoints = points.map(p => ({ x: p.x, y: p.online ? p.y : null }));
+      const offlinePoints = points.map(p => ({ x: p.x, y: p.online ? null : 0 }));
 
-      const tooltipLabel = (ts, players) => {
+      const tooltipLabel = (ts, players, online) => {
         const dt = new Date(ts);
         const date = dt.toLocaleDateString([], { month: "2-digit", day: "2-digit" });
         const time = dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+        if (!online) return `${date} ${time} — OFFLINE`;
         return `${date} ${time} — ${players} players`;
       };
 
@@ -403,16 +424,29 @@
         historyChart = new Chart(canvas, {
           type: "line",
           data: {
-            datasets: [{
-              label: "Players",
-              data: dataPoints,
-              stepped: true,
-              tension: 0,
-              pointRadius: 2,
-              pointHoverRadius: 5,
-              borderWidth: 2,
-              parsing: false
-            }]
+            datasets: [
+              {
+                label: "Players",
+                data: playersPoints,
+                stepped: true,
+                tension: 0,
+                pointRadius: 2,
+                pointHoverRadius: 5,
+                borderWidth: 2,
+                parsing: false
+              },
+              {
+                label: "Offline",
+                data: offlinePoints,
+                stepped: true,
+                tension: 0,
+                pointRadius: 0,
+                borderWidth: 0,
+                fill: "origin",
+                backgroundColor: "rgba(255, 92, 122, .12)",
+                parsing: false
+              }
+            ]
           },
           options: {
             responsive: true,
@@ -425,7 +459,14 @@
                 intersect: false,
                 mode: "nearest",
                 callbacks: {
-                  label: (item) => tooltipLabel(item.parsed.x, item.parsed.y)
+                  label: (item) => {
+                    const ts = item.parsed.x;
+                    // Find the matching point (same timestamp). Points list is small; O(n) is fine.
+                    const p = points.find(pp => pp.x === ts);
+                    const online = p ? !!p.online : (item.datasetIndex === 0);
+                    const players = p ? (p.y ?? 0) : (item.parsed.y ?? 0);
+                    return tooltipLabel(ts, players, online);
+                  }
                 }
               }
             },
@@ -455,79 +496,139 @@
           }
         });
       } else {
-        historyChart.data.datasets[0].data = dataPoints;
-
+        historyChart.data.datasets[0].data = playersPoints;
+        historyChart.data.datasets[1].data = offlinePoints;
         historyChart.options.scales.x.time.unit = timeUnit;
         historyChart.options.scales.x.ticks.maxTicksLimit = historyHours === 24 ? 8 : 7;
-
         historyChart.update();
       }
     }
 
     async function refreshHistory() {
       try {
-        const r = await fetch(`${HISTORY_URL}?hours=${historyHours}`, { cache: "no-store" });
+        // Determine fetch window:
+        // - preset 24h / 7d: fetch that many hours
+        // - custom: fetch from (now - from) hours, then filter to [from, to]
+        const now = Date.now();
+
+        let fromMs = null;
+        let toMs = now;
+
+        if (historyMode === "custom") {
+          const fromVal = el("fromDt").value;
+          const toVal = el("toDt").value;
+          fromMs = fromVal ? new Date(fromVal).getTime() : (now - 6 * 3600 * 1000);
+          toMs = toVal ? new Date(toVal).getTime() : now;
+
+          // Safety: clamp
+          if (!Number.isFinite(fromMs)) fromMs = now - 6 * 3600 * 1000;
+          if (!Number.isFinite(toMs)) toMs = now;
+          if (toMs < fromMs) [fromMs, toMs] = [toMs, fromMs];
+          if (toMs > now) toMs = now;
+        }
+
+        const fetchHours = (historyMode === "custom")
+          ? Math.max(1, Math.ceil((now - fromMs) / 3600000) + 1)
+          : historyHours;
+
+        const r = await fetch(`${HISTORY_URL}?hours=${fetchHours}`, { cache: "no-store" });
         const d = await r.json();
 
         const points = Array.isArray(d.points) ? d.points : [];
         if (!points.length) {
-          buildOrUpdateChart([], []);
+          buildOrUpdateChart([{ x: now, y: 0, online: false }]);
           return;
         }
 
-        // Keep only points where the visible value changes (offline/online or players count).
+        // Map to normalized points
+        const normalized = points
+          .filter(p => p && typeof p.ts === "number")
+          .map(p => ({
+            x: p.ts,
+            online: !!p.online,
+            y: p.online ? (p.players ?? 0) : 0
+          }));
+
+        // Apply custom filter if needed
+        const filtered = (historyMode === "custom")
+          ? normalized.filter(p => p.x >= fromMs && p.x <= toMs)
+          : normalized;
+
+        if (!filtered.length) {
+          buildOrUpdateChart([{ x: now, y: 0, online: false }]);
+          return;
+        }
+
+        // Keep only points where the visible state changes.
         // Always keep first + last.
         const reduced = [];
-        let lastVal = null;
+        let lastKey = null;
 
-        for (let i = 0; i < points.length; i++) {
-          const p = points[i];
-          const val = (p && p.online) ? (p.players ?? 0) : 0;
+        for (let i = 0; i < filtered.length; i++) {
+          const p = filtered[i];
+          const key = `${p.online ? 1 : 0}:${p.online ? p.y : 0}`;
 
-          if (i === 0 || i === points.length - 1 || val !== lastVal) {
-            reduced.push({ ts: p.ts, val });
-            lastVal = val;
+          if (i === 0 || i === filtered.length - 1 || key !== lastKey) {
+            reduced.push(p);
+            lastKey = key;
           }
         }
 
-        const timestamps = reduced.map(x => x.ts);
-        const values = reduced.map(x => x.val);
+        // Always end at "now" (or at custom 'to' time if chosen)
+        const endMs = (historyMode === "custom") ? toMs : now;
+        const last = reduced[reduced.length - 1];
 
-        // Always show a "now" point so the chart ends at the current time,
-        // even when there were no changes recently.
-        const now = Date.now();
-        if (timestamps.length) {
-          const lastTs = timestamps[timestamps.length - 1];
-          const lastVal = values[values.length - 1];
-          // If the last sample is older than 30s, extend to "now"
-          if (now - lastTs > 30 * 1000) {
-            timestamps.push(now);
-            values.push(lastVal);
-          }
-        } else {
-          // No history yet: show a single point at "now"
-          timestamps.push(now);
-          values.push(0);
+        if (endMs - last.x > 30 * 1000) {
+          reduced.push({ x: endMs, y: last.y, online: last.online });
         }
 
-        buildOrUpdateChart(timestamps, values);
+        buildOrUpdateChart(reduced);
       } catch (e) {
-        buildOrUpdateChart([], []);
+        buildOrUpdateChart([{ x: Date.now(), y: 0, online: false }]);
       }
     }
 
     el("range24").addEventListener("click", () => {
+      historyMode = "preset";
       historyHours = 24;
       setActiveRangeButton();
       refreshHistory();
     });
 
     el("range7d").addEventListener("click", () => {
+      historyMode = "preset";
       historyHours = 24 * 7;
       setActiveRangeButton();
       refreshHistory();
     });
 
+    // Custom range
+    function setDefaultCustomInputs() {
+      const now = new Date();
+      const pad = (n) => String(n).padStart(2, "0");
+      const toStr = (d) => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
+      const to = now;
+      const from = new Date(now.getTime() - 6 * 3600 * 1000);
+
+      if (!el("toDt").value) el("toDt").value = toStr(to);
+      if (!el("fromDt").value) el("fromDt").value = toStr(from);
+    }
+
+    el("rangeCustom").addEventListener("click", () => {
+      historyMode = "custom";
+      setDefaultCustomInputs();
+      setActiveRangeButton();
+      refreshHistory();
+    });
+
+    el("applyCustom").addEventListener("click", () => {
+      historyMode = "custom";
+      setActiveRangeButton();
+      refreshHistory();
+    });
+
+historyMode = "preset";
     setActiveRangeButton();
     refreshHistory();
     setInterval(refreshHistory, 60000); // 1 min
