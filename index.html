@@ -334,6 +334,9 @@
     const API_URL = "https://api.kundze.lt/api/valheim";
     const HISTORY_URL = "https://api.kundze.lt/api/history";
 
+    // Latest snapshot from /api/valheim (used to anchor the chart at "now")
+    let currentSnapshot = null;
+
 
     const el = (id) => document.getElementById(id);
 
@@ -366,6 +369,8 @@
         const r = await fetch(API_URL, { cache: "no-store" });
         const d = await r.json();
 
+
+        currentSnapshot = d;
         setState({
           online: !!d.online,
           name: d.name,
@@ -556,9 +561,9 @@
           }));
 
         // Apply custom filter if needed
-        const filtered = (historyMode === "custom")
+        const filtered = ((historyMode === "custom")
           ? normalized.filter(p => p.x >= fromMs && p.x <= toMs)
-          : normalized;
+          : normalized).sort((a,b)=>a.x-b.x);
 
         if (!filtered.length) {
           buildOrUpdateChart([{ x: now, y: 0, online: false }]);
@@ -582,10 +587,22 @@
 
         // Always end at "now" (or at custom 'to' time if chosen)
         const endMs = (historyMode === "custom") ? toMs : now;
+
+        // Use the latest snapshot (from /api/valheim) to decide what "now" is.
+        // This prevents weirdness when switching ranges (e.g. last history point is offline but server is online now).
+        const snap = currentSnapshot;
+        const snapOnline = snap ? !!snap.online : null;
+        const snapPlayers = snap ? (snap.players ?? 0) : null;
+
         const last = reduced[reduced.length - 1];
+        const endOnline = (snapOnline === null) ? last.online : snapOnline;
+        const endPlayers = (snapPlayers === null) ? last.y : (endOnline ? snapPlayers : 0);
 
         if (endMs - last.x > 30 * 1000) {
-          reduced.push({ x: endMs, y: last.y, online: last.online });
+          reduced.push({ x: endMs, y: endPlayers, online: endOnline });
+        } else {
+          // If last point is already "now-ish", still ensure it reflects the current snapshot
+          reduced[reduced.length - 1] = { x: last.x, y: endPlayers, online: endOnline };
         }
 
         buildOrUpdateChart(reduced);
