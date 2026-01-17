@@ -302,7 +302,7 @@
           <button id="range7d" type="button">7d</button>
         </div>
       </div>
-      <div class="label" style="margin-top:8px">Grafike palikti tik pasikeitimų taškai. Užvedus pelę matysi tikslų laiką.</div>
+      <div class="label" style="margin-top:8px">Grafike palikti tik pasikeitimų taškai, bet pabaigoje visada pridedamas taškas „dabar“. Užvedus pelę matysi tikslų laiką.</div>
       <div class="chart-wrap">
         <canvas id="historyChart"></canvas>
       </div>
@@ -492,6 +492,23 @@
 
         const timestamps = reduced.map(x => x.ts);
         const values = reduced.map(x => x.val);
+
+        // Always show a "now" point so the chart ends at the current time,
+        // even when there were no changes recently.
+        const now = Date.now();
+        if (timestamps.length) {
+          const lastTs = timestamps[timestamps.length - 1];
+          const lastVal = values[values.length - 1];
+          // If the last sample is older than 30s, extend to "now"
+          if (now - lastTs > 30 * 1000) {
+            timestamps.push(now);
+            values.push(lastVal);
+          }
+        } else {
+          // No history yet: show a single point at "now"
+          timestamps.push(now);
+          values.push(0);
+        }
 
         buildOrUpdateChart(timestamps, values);
       } catch (e) {
