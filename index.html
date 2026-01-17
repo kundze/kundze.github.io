@@ -241,7 +241,7 @@
     <header>
       <div class="title">
         <h1>Valheim serverio būsena</h1>
-        <div class="subtitle">Rodo aktyvių žaidėjų skaičių tavo serveryje realiu laiku.</div>
+        <div class="subtitle">Aktyvių žaidėjų skaičių serveryje realiu laiku.</div>
       </div>
       <div class="pill" title="Atnaujinama automatiškai kas 15 sekundžių">
         <span class="dot" id="pillDot"></span>
@@ -318,16 +318,13 @@
           <button id="applyCustom" type="button">Apply</button>
         </div>
       </div>
-      <div class="label" style="margin-top:8px">Grafike palikti tik pasikeitimų taškai, bet pabaigoje visada pridedamas taškas „dabar“. Offline periodai pažymėti atskirai. Užvedus pelę matysi tikslų laiką.</div>
+      <div class="label" style="margin-top:8px">Užvedus pelę matysi tikslų laiką.</div>
       <div class="chart-wrap">
         <canvas id="historyChart"></canvas>
       </div>
     </div>
 
 
-    <div class="foot">
-      Duomenys imami iš tavo API: <a href="https://api.kundze.lt/api/valheim" target="_blank" rel="noreferrer">https://api.kundze.lt/api/valheim</a>
-    </div>
   </div>
 
   <script>
@@ -394,6 +391,8 @@
     let historyChart = null;
     let historyHours = 24;
     let historyMode = "preset"; // preset | custom
+    // Used by tooltip callbacks to avoid stale closures when chart data is updated.
+    let chartTooltipPoints = [];
 
     function setActiveRangeButton() {
       el("range24").classList.toggle("active", historyMode === "preset" && historyHours === 24);
@@ -405,6 +404,9 @@
     function buildOrUpdateChart(points) {
       const canvas = document.getElementById("historyChart");
       if (!canvas) return;
+
+      // Keep a fresh reference for tooltip callbacks (prevents stale closures after range switches)
+      chartTooltipPoints = points;
 
       // points: [{x: ts, y: players, online: bool}, ...]
       const playersPoints = points.map(p => ({ x: p.x, y: p.online ? p.y : null }));
@@ -468,9 +470,14 @@
                   label: (item) => {
                     const ts = item.parsed.x;
                     // Find the matching point (same timestamp). Points list is small; O(n) is fine.
-                    const p = points.find(pp => pp.x === ts);
-                    const online = p ? !!p.online : (item.datasetIndex === 0);
-                    const players = p ? (p.y ?? 0) : (item.parsed.y ?? 0);
+                    const p = chartTooltipPoints.find(pp => pp.x === ts);
+
+                    // If we can't find the exact point (can happen if tooltip callback captured old data),
+                    // infer state from the dataset: Players dataset (index 1) means online.
+                    const online = p ? !!p.online : (item.datasetIndex === 1);
+                    const players = p
+                      ? (p.y ?? 0)
+                      : (item.datasetIndex === 1 ? (item.parsed.y ?? 0) : 0);
                     return tooltipLabel(ts, players, online);
                   }
                 }
